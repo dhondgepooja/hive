@@ -1,11 +1,12 @@
 package org.apache.hive.hcatalog.mapreduce;
 
 import com.google.common.base.Preconditions;
+import org.apache.avro.specific.SpecificRecord;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.ql.metadata.HiveStorageHandler;
-import org.apache.hadoop.hive.serde2.avro.AvroGenericRecordWritable;
+import org.apache.hadoop.hive.serde2.avro.AvroSpecificRecordWritable;
 import org.apache.hadoop.io.WritableComparable;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapreduce.InputFormat;
@@ -20,11 +21,10 @@ import org.apache.hive.hcatalog.common.HCatUtil;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-public class HcatAvroInputFormat extends InputFormat<WritableComparable, AvroGenericRecordWritable> {
+public class HcatAvroInputFormat<T extends SpecificRecord> extends InputFormat<WritableComparable, AvroSpecificRecordWritable<T>> {
 
 
     private Configuration conf;
@@ -50,7 +50,7 @@ public class HcatAvroInputFormat extends InputFormat<WritableComparable, AvroGen
         return (InputJobInfo) HCatUtil.deserialize(jobString);
     }
 
-    private List<String> setInputPath(JobConf jobConf, String location)
+    private void setInputPath(JobConf jobConf, String location)
             throws IOException {
 
         // ideally we should just call FileInputFormat.setInputPaths() here - but
@@ -91,33 +91,19 @@ public class HcatAvroInputFormat extends InputFormat<WritableComparable, AvroGen
         }
         pathStrings.add(location.substring(pathStart, length));
 
+        Path[] paths = StringUtils.stringToPath(pathStrings.toArray(new String[0]));
         String separator = "";
         StringBuilder str = new StringBuilder();
 
-        boolean ignoreInvalidPath =jobConf.getBoolean(HCatConstants.HCAT_INPUT_IGNORE_INVALID_PATH_KEY,
-                HCatConstants.HCAT_INPUT_IGNORE_INVALID_PATH_DEFAULT);
-        Iterator<String> pathIterator = pathStrings.iterator();
-        while (pathIterator.hasNext()) {
-            String pathString = pathIterator.next();
-            if (ignoreInvalidPath && org.apache.commons.lang.StringUtils.isBlank(pathString)) {
-                continue;
-            }
-            Path path = new Path(pathString);
+        for (Path path : paths) {
             FileSystem fs = path.getFileSystem(jobConf);
-            if (ignoreInvalidPath && !fs.exists(path)) {
-                pathIterator.remove();
-                continue;
-            }
             final String qualifiedPath = fs.makeQualified(path).toString();
             str.append(separator)
                     .append(StringUtils.escapeString(qualifiedPath));
             separator = StringUtils.COMMA_STR;
         }
 
-        if (!ignoreInvalidPath || !pathStrings.isEmpty()) {
-            jobConf.set("mapred.input.dir", str.toString());
-        }
-        return pathStrings;
+        jobConf.set("mapred.input.dir", str.toString());
     }
 
     /**
@@ -153,20 +139,13 @@ public class HcatAvroInputFormat extends InputFormat<WritableComparable, AvroGen
         }
 
         HiveStorageHandler storageHandler;
-        Map<String,String> hiveProps = null;
         //For each matching partition, call getSplits on the underlying InputFormat
         for (PartInfo partitionInfo : partitionInfoList) {
             JobConf jobConf = HCatUtil.getJobConfFromContext(jobContext);
-            if (hiveProps == null) {
-                hiveProps = HCatUtil.getHCatKeyHiveConf(jobConf);
-            }
-            List<String> setInputPath = setInputPath(jobConf, partitionInfo.getLocation());
-            if (setInputPath.isEmpty()) {
-                continue;
-            }
+            setInputPath(jobConf, partitionInfo.getLocation());
             Map<String, String> jobProperties = partitionInfo.getJobProperties();
 
-            HCatUtil.copyJobPropertiesToJobConf(hiveProps, jobConf);
+            HCatUtil.copyJobPropertiesToJobConf(jobProperties, jobConf);
             HCatUtil.copyJobPropertiesToJobConf(jobProperties, jobConf);
 
             storageHandler = HCatUtil.getStorageHandler(
@@ -197,7 +176,9 @@ public class HcatAvroInputFormat extends InputFormat<WritableComparable, AvroGen
     }
 
     @Override
-    public RecordReader<WritableComparable, AvroGenericRecordWritable> createRecordReader(org.apache.hadoop.mapreduce.InputSplit inputSplit, TaskAttemptContext taskAttemptContext) throws IOException, InterruptedException {
+    public RecordReader<WritableComparable, AvroSpecificRecordWritable<T>> createRecordReader(org.apache.hadoop.mapreduce
+                                                                                                        .InputSplit inputSplit,
+                                                                  TaskAttemptContext taskAttemptContext) throws IOException, InterruptedException {
         HCatSplit hcatSplit = InternalUtil.castToHCatSplit(inputSplit);
         PartInfo partitionInfo = hcatSplit.getPartitionInfo();
         // Ensure PartInfo's TableInfo is initialized.
@@ -216,7 +197,7 @@ public class HcatAvroInputFormat extends InputFormat<WritableComparable, AvroGen
         Map<String, String> jobProperties = partitionInfo.getJobProperties();
         HCatUtil.copyJobPropertiesToJobConf(jobProperties, jobConf);
 
-        return new HCatAvroRecordReader(storageHandler, null);
+        return new HCatAvroRecordReader<T>(storageHandler, null);
     }
 
 

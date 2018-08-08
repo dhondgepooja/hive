@@ -1,7 +1,8 @@
 package org.apache.hive.hcatalog.mapreduce;
 
+import org.apache.avro.specific.SpecificRecord;
 import org.apache.hadoop.hive.ql.metadata.HiveStorageHandler;
-import org.apache.hadoop.hive.serde2.avro.AvroGenericRecordWritable;
+import org.apache.hadoop.hive.serde2.avro.AvroSpecificRecordWritable;
 import org.apache.hadoop.io.Writable;
 import org.apache.hadoop.io.WritableComparable;
 import org.apache.hadoop.mapred.JobConf;
@@ -9,34 +10,29 @@ import org.apache.hadoop.mapreduce.InputSplit;
 import org.apache.hadoop.mapreduce.RecordReader;
 import org.apache.hadoop.mapreduce.TaskAttemptContext;
 import org.apache.hive.hcatalog.common.HCatUtil;
-import org.apache.hive.hcatalog.data.DefaultHCatRecord;
-import org.apache.hive.hcatalog.data.HCatRecord;
-import org.apache.hive.hcatalog.data.LazyHCatRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.Map;
 
-public class HCatAvroRecordReader  extends RecordReader<WritableComparable, AvroGenericRecordWritable> {
+public class HCatAvroRecordReader<T extends SpecificRecord>  extends RecordReader<WritableComparable,
+        AvroSpecificRecordWritable<T>> {
 
     private static final Logger LOG = LoggerFactory.getLogger(HCatAvroRecordReader.class);
 
     WritableComparable currentKey;
-    AvroGenericRecordWritable currentValue;
+    AvroSpecificRecordWritable<T> currentValue;
 
     org.apache.hadoop.mapred.RecordReader<WritableComparable,Writable> baseRecordReader;
 
     private final HiveStorageHandler storageHandler;
-    private Map<String, Object> valuesNotInDataCols;
-
     /**
      * Instantiates a new hcat record reader.
      */
     public HCatAvroRecordReader(HiveStorageHandler storageHandler,
                             Map<String, Object> valuesNotInDataCols) {
         this.storageHandler = storageHandler;
-        this.valuesNotInDataCols = valuesNotInDataCols;
     }
 
     @Override
@@ -50,7 +46,7 @@ public class HCatAvroRecordReader  extends RecordReader<WritableComparable, Avro
     public boolean nextKeyValue() throws IOException, InterruptedException {
         if (currentKey == null) {
             currentKey = baseRecordReader.createKey();
-            currentValue = (AvroGenericRecordWritable) baseRecordReader.createValue();
+            currentValue = (AvroSpecificRecordWritable<T>) baseRecordReader.createValue();
         }
 
         while (baseRecordReader.next(currentKey, currentValue)) {
@@ -66,7 +62,7 @@ public class HCatAvroRecordReader  extends RecordReader<WritableComparable, Avro
     }
 
     @Override
-    public AvroGenericRecordWritable getCurrentValue() throws IOException, InterruptedException {
+    public AvroSpecificRecordWritable<T> getCurrentValue() throws IOException, InterruptedException {
         return currentValue;
     }
 
